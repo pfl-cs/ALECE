@@ -1,0 +1,739 @@
+diff -Naur postgresql-13.1/src/backend/optimizer/path/costsize.c postgresql-13.1-modify/src/backend/optimizer/path/costsize.c
+--- postgresql-13.1/src/backend/optimizer/path/costsize.c	2020-11-10 06:24:30.000000000 +0800
++++ postgresql-13.1-modify/src/backend/optimizer/path/costsize.c	2023-05-27 14:12:20.000000000 +0800
+@@ -97,9 +97,40 @@
+ #include "utils/spccache.h"
+ #include "utils/tuplesort.h"
+ 
++#include "nodes/print.h"
++#include <unistd.h>
++#include <time.h>
++#include <stdlib.h>
++#include <stdio.h>
++#include <assert.h>
+ 
+ #define LOG2(x)  (log(x) / 0.693147180559945)
+ 
++/** modified  */
++#define CARD_EST_QUERY_NUM 40000
++static double single_card_ests[CARD_EST_QUERY_NUM] = {0.0};
++static double join_card_ests[CARD_EST_QUERY_NUM] = {0.0};
++bool        debug_mode = false;
++
++int         mainquery_no = 0;
++bool        print_sub_queries = false;
++bool        read_single_cards = false;
++bool        read_join_cards = false;
++int         single_est_no = 0;
++int         join_est_no = 0;
++int         single_read_flag = 0;
++int         join_read_flag = 0;
++char        *single_cards_fname = NULL;
++char        *join_cards_fname = NULL;
++bool        write_pg_card_estimates = false;
++char        *pg_join_cards_fname = NULL;
++char        *pg_single_cards_fname = NULL;
++
++/** =====modified  */
++bool query_fmt = true;
++char sub_query[8000];
++bool isWhereOrAnd;
++
+ /*
+  * Append and MergeAppend nodes are less expensive than some other operations
+  * which use cpu_tuple_cost; instead of adding a separate GUC, estimate the
+@@ -180,6 +211,338 @@
+ static double page_size(double tuples, int width);
+ static double get_parallel_divisor(Path *path);
+ 
++/** further modified */
++static void get_expr(const Node *expr, const List *rtable);
++static void get_restrictclauses(PlannerInfo *root, List *clauses);
++static void get_relids (PlannerInfo *root, Relids relids);
++static void get_single_rel (PlannerInfo *root, RelOptInfo *rel);
++static void get_path(PlannerInfo *root, Path *path);
++static void get_join_info (PlannerInfo *root, RelOptInfo *rel);
++static void get_base_restrictclauses (PlannerInfo *root, Relids relids);
++static void get_join_rel (PlannerInfo *root,
++              RelOptInfo *join_rel,
++              RelOptInfo *outer_rel,
++              RelOptInfo *inner_rel,
++              List *restrictlist_in);
++
++// ------------------------------------------------
++static void
++read_single_card_estimates_from_file(const char* filename);
++
++static void
++read_join_card_estimates_from_file(const char* filename);
++
++static void
++get_expr(const Node *expr, const List *rtable)
++{
++    if (expr == NULL)
++    {
++        printf("<>");
++        return;
++    }
++
++    if (IsA(expr, Var))
++    {
++        const Var  *var = (const Var *) expr;
++        char	*relname,
++                *attname;
++
++        switch (var->varno)
++        {
++            case INNER_VAR:
++                relname = "INNER";
++                attname = "?";
++                break;
++            case OUTER_VAR:
++                relname = "OUTER";
++                attname = "?";
++                break;
++            case INDEX_VAR:
++                relname = "INDEX";
++                attname = "?";
++                break;
++            default:
++            {
++                RangeTblEntry *rte;
++
++                Assert(var->varno > 0 &&
++                       (int) var->varno <= list_length(rtable));
++                rte = rt_fetch(var->varno, rtable);
++                relname = rte->eref->aliasname;
++                attname = get_rte_attribute_name(rte, var->varattno);
++            }
++                break;
++        }
++        if (query_fmt){
++            strcat(sub_query, relname);
++            strcat(sub_query, ".");
++            strcat(sub_query, attname);
++        }
++        else
++            strcat(sub_query, attname);
++    }
++    else if (IsA(expr, Const))
++    {
++        const Const *c = (const Const *) expr;
++        Oid			typoutput;
++        bool		typIsVarlena;
++        char	   *outputstr;
++
++        if (c->constisnull)
++        {
++            printf("NULL");
++            return;
++        }
++
++        getTypeOutputInfo(c->consttype,
++                          &typoutput, &typIsVarlena);
++
++        outputstr = OidOutputFunctionCall(typoutput, c->constvalue);
++        strcat(sub_query, outputstr);
++        pfree(outputstr);
++    }
++    else if (IsA(expr, OpExpr))
++    {
++        const OpExpr *e = (const OpExpr *) expr;
++        char	   *opname;
++
++        opname = get_opname(e->opno);
++        if (list_length(e->args) > 1)
++        {
++            get_expr(get_leftop((const Expr *) e), rtable);
++            strcat(sub_query, " ");
++            strcat(sub_query, opname);
++            strcat(sub_query, " ");
++            get_expr(get_rightop((const Expr *) e), rtable);
++
++        }
++        else
++        {
++            /* we print prefix and postfix ops the same... */
++            strcat(sub_query, opname);
++            strcat(sub_query, " ");
++            get_expr(get_leftop((const Expr *) e), rtable);
++        }
++    }
++    else if (IsA(expr, FuncExpr))
++    {
++        const FuncExpr *e = (const FuncExpr *) expr;
++        char	   *funcname;
++        ListCell   *l;
++
++        funcname = get_func_name(e->funcid);
++        printf("%s(", ((funcname != NULL) ? funcname : "(invalid function)"));
++        foreach(l, e->args)
++        {
++            print_expr(lfirst(l), rtable);
++            if (lnext(e->args, l))
++                printf(",");
++        }
++        printf(")");
++    }
++    else
++        printf("unknown expr");
++}
++
++
++static void
++get_restrictclauses(PlannerInfo *root, List *clauses)
++{
++    ListCell   *l;
++    bool		first = true;
++    char	   *prefix;
++    foreach(l, clauses)
++    {
++        if (first){
++            prefix = isWhereOrAnd ? " where " : " and ";
++            strcat(sub_query, prefix);
++            isWhereOrAnd = false;
++        }
++
++        RestrictInfo *c = lfirst(l);
++        get_expr((Node *) c->clause, root->parse->rtable);
++        if (lnext(clauses, l))
++            strcat(sub_query, " and ");
++        first = false;
++    }
++}
++
++
++
++static void
++get_relids (PlannerInfo *root, Relids relids){
++    int			x;
++    bool		first = true;
++    x = -1;
++    while ((x = bms_next_member(relids, x)) >= 0)
++    {
++        if (!first)
++            strcat(sub_query, ", ");
++        if (x < root->simple_rel_array_size &&
++            root->simple_rte_array[x]){
++            if (!query_fmt){
++                strcat(sub_query, get_database_name(MyDatabaseId));
++                strcat(sub_query, ".");
++                strcat(sub_query, get_rel_name(root->simple_rte_array[x]->relid));
++            }
++            else{
++                char *rname = get_rel_name(root->simple_rte_array[x]->relid);
++                char *alias = root->simple_rte_array[x]->eref->aliasname;
++                if (strcmp(rname, alias)==0)
++                    strcat(sub_query, rname);
++                else{
++                    strcat(sub_query, rname);
++                    strcat(sub_query, " as ");
++                    strcat(sub_query, alias);
++                }
++            }
++
++
++        }
++        else
++            strcat(sub_query, "error");
++        first = false;
++    }
++}
++
++static void
++get_single_rel (PlannerInfo *root, RelOptInfo *rel) {
++    if (query_fmt)
++        strcpy(sub_query, "select count(*) from ");
++    else
++        strcpy(sub_query, "select * from ");
++    get_relids(root, rel->relids);
++    isWhereOrAnd = true;
++    get_restrictclauses(root, rel->baserestrictinfo);
++    strcat(sub_query, ";||");
++    char main_query_no_str[11];
++    sprintf(main_query_no_str, "%d", mainquery_no);
++    strcat(sub_query, main_query_no_str);
++    strcat(sub_query, "\0");
++    FILE *fp = fopen("single_sub_queries.txt", "a+");
++    fprintf(fp, "%s\n",sub_query);
++    fclose(fp);
++}
++
++static void
++get_path(PlannerInfo *root, Path *path)
++{
++    bool		join = false;
++    Path	   *subpath = NULL;
++    switch (nodeTag(path))
++    {
++        case T_NestPath:
++            join = true;
++            break;
++        case T_MergePath:
++            join = true;
++            break;
++        case T_HashPath:
++            join = true;
++            break;
++        case T_GatherPath:
++            subpath = ((GatherPath *) path)->subpath;
++            break;
++        case T_GatherMergePath:
++            subpath = ((GatherMergePath *) path)->subpath;
++            break;
++    }
++
++    if (join)
++    {
++        JoinPath   *jp = (JoinPath *) path;
++
++        if (jp->joinrestrictinfo){
++            get_restrictclauses(root, jp->joinrestrictinfo);
++        }
++        else if (jp->innerjoinpath && jp->innerjoinpath->param_info && jp->innerjoinpath->param_info->ppi_clauses){
++            get_restrictclauses(root, jp->innerjoinpath->param_info->ppi_clauses);
++        }
++
++        get_path(root, jp->outerjoinpath);
++        get_path(root, jp->innerjoinpath);
++    }
++    if (subpath)
++        get_path(root, subpath);
++}
++
++static void
++get_join_info (PlannerInfo *root, RelOptInfo *rel){
++    if (rel->cheapest_total_path)
++        get_path(root, rel->cheapest_total_path);
++}
++
++static void
++get_base_restrictclauses (PlannerInfo *root, Relids relids){
++    int			x;
++    // char	    *rname;
++    x = -1;
++    while ((x = bms_next_member(relids, x)) >= 0)
++    {
++        if (x < root->simple_rel_array_size &&
++            root->simple_rel_array[x]){
++            get_restrictclauses(root, root->simple_rel_array[x]->baserestrictinfo);
++        }
++        else
++            strcat(sub_query, "error");
++    }
++}
++
++static void
++get_join_rel (PlannerInfo *root,
++              RelOptInfo *join_rel,
++              RelOptInfo *outer_rel,
++              RelOptInfo *inner_rel,
++              List *restrictlist_in) {
++    strcpy(sub_query, "select count(*) from ");
++    get_relids(root, join_rel->relids);
++    isWhereOrAnd = true;
++    get_restrictclauses(root, restrictlist_in);
++    get_join_info(root, inner_rel);
++    get_join_info(root, outer_rel);
++    get_base_restrictclauses(root, join_rel->relids);
++    strcat(sub_query, ";||");
++    char main_query_no_str[11];
++    sprintf(main_query_no_str, "%d", mainquery_no);
++    strcat(sub_query, main_query_no_str);
++    strcat(sub_query, "\0");
++    FILE *fp = fopen("join_sub_queries.txt", "a+");
++    fprintf(fp, "%s\n",sub_query);
++    fclose(fp);
++}
++
++static void
++read_single_card_estimates_from_file(const char* filename)
++{
++    FILE* fp = fopen(filename, "r");
++    double card_est;
++    int query_cnt = 0;
++
++    while (fscanf(fp, "%lf", &card_est) == 1){
++        single_card_ests[query_cnt] = card_est;
++        query_cnt += 1;
++    }
++
++    fclose(fp);
++}
++
++static void
++read_join_card_estimates_from_file(const char* filename){
++    FILE* fp = fopen(filename, "r");
++
++    double card_est;
++    int cnt = 0;
++
++    while (fscanf(fp, "%lf", &card_est) == 1){
++        join_card_ests[cnt] = card_est;
++        cnt += 1;
++    }
++
++    fclose(fp);
++}
++
++/** =====modified  */
++
+ 
+ /*
+  * clamp_row_est
+@@ -4654,8 +5017,33 @@
+ 							   JOIN_INNER,
+ 							   NULL);
+ 
++    if (write_pg_card_estimates) {
++        FILE *fp = fopen(pg_single_cards_fname, "a+");
++        fprintf(fp, "%lf\n", nrows);
++        fclose(fp);
++    }
++
++	if(read_single_cards){
++        if (single_read_flag == 1) {
++            read_single_card_estimates_from_file(single_cards_fname);
++            single_read_flag = 0;
++        }
++
++        nrows = single_card_ests[single_est_no];
++//        if (debug_mode) {
++//            FILE *fp = fopen("debug_single.txt", "a+");
++//            fprintf(fp, "%d, %d, %lf\n", mainquery_no, single_est_no, nrows);
++//            fclose(fp);
++//        }
++        single_est_no++;
++	}
++
+ 	rel->rows = clamp_row_est(nrows);
+ 
++	if(print_sub_queries){
++        get_single_rel(root, rel);
++	}
++
+ 	cost_qual_eval(&rel->baserestrictcost, rel->baserestrictinfo, root);
+ 
+ 	set_rel_width(root, rel);
+@@ -4733,6 +5121,7 @@
+ 										   inner_rel->rows,
+ 										   sjinfo,
+ 										   restrictlist);
++
+ }
+ 
+ /*
+@@ -4776,12 +5165,14 @@
+ 									   inner_path->rows,
+ 									   sjinfo,
+ 									   restrict_clauses);
++//    print_est_card(__FUNCTION__, nrows);
+ 	/* For safety, make sure result is not more than the base estimate */
+ 	if (nrows > rel->rows)
+ 		nrows = rel->rows;
+ 	return nrows;
+ }
+ 
++
+ /*
+  * calc_joinrel_size_estimate
+  *		Workhorse for set_joinrel_size_estimates and
+@@ -4798,12 +5189,12 @@
+ 						   RelOptInfo *inner_rel,
+ 						   double outer_rows,
+ 						   double inner_rows,
+-						   SpecialJoinInfo *sjinfo,
++                           SpecialJoinInfo *sjinfo,
+ 						   List *restrictlist_in)
+ {
+ 	/* This apparently-useless variable dodges a compiler bug in VS2013: */
+ 	List	   *restrictlist = restrictlist_in;
+-	JoinType	jointype = sjinfo->jointype;
++    JoinType	jointype = sjinfo->jointype;
+ 	Selectivity fkselec;
+ 	Selectivity jselec;
+ 	Selectivity pselec;
+@@ -4824,6 +5215,7 @@
+ 	 * join strength reduction.)  fkselec gets the net selectivity for
+ 	 * FK-matching clauses, or 1.0 if there are none.
+ 	 */
++
+ 	fkselec = get_foreign_key_join_selectivity(root,
+ 											   outer_rel->relids,
+ 											   inner_rel->relids,
+@@ -4871,7 +5263,7 @@
+ 	else
+ 	{
+ 		jselec = clauselist_selectivity(root,
+-										restrictlist,
++                                        restrictlist,
+ 										0,
+ 										jointype,
+ 										sjinfo);
+@@ -4925,6 +5317,33 @@
+ 			break;
+ 	}
+ 
++
++    if (write_pg_card_estimates) {
++        FILE *fp = fopen(pg_join_cards_fname, "a+");
++        fprintf(fp, "%lf\n", nrows);
++        fclose(fp);
++    }
++
++    if (print_sub_queries) {
++        get_join_rel(root, joinrel, outer_rel, inner_rel, restrictlist_in);
++    }
++
++    if (read_join_cards) {
++        if (join_read_flag == 1) {
++            read_join_card_estimates_from_file(join_cards_fname);
++            join_read_flag = 0;
++        }
++        double join_est = join_card_ests[join_est_no];
++//        if (debug_mode) {
++//            FILE *fp = fopen("debug.txt", "a+");
++//            fprintf(fp, "%d, %d, %lf\n", mainquery_no, join_est_no, join_est);
++//            fclose(fp);
++//        }
++
++        join_est_no++;
++        return clamp_row_est(join_est);
++    }
++
+ 	return clamp_row_est(nrows);
+ }
+ 
+@@ -4953,12 +5372,13 @@
+ 	Selectivity fkselec = 1.0;
+ 	JoinType	jointype = sjinfo->jointype;
+ 	List	   *worklist = *restrictlist;
+-	ListCell   *lc;
++    ListCell   *lc;
+ 
+ 	/* Consider each FK constraint that is known to match the query */
++
+ 	foreach(lc, root->fkey_list)
+ 	{
+-		ForeignKeyOptInfo *fkinfo = (ForeignKeyOptInfo *) lfirst(lc);
++        ForeignKeyOptInfo *fkinfo = (ForeignKeyOptInfo *) lfirst(lc);
+ 		bool		ref_is_outer;
+ 		List	   *removedlist;
+ 		ListCell   *cell;
+@@ -5129,9 +5549,9 @@
+ 			RelOptInfo *ref_rel = find_base_rel(root, fkinfo->ref_relid);
+ 			double		ref_tuples = Max(ref_rel->tuples, 1.0);
+ 
+-			fkselec *= 1.0 / ref_tuples;
++            fkselec *= 1.0 / ref_tuples;
+ 		}
+-	}
++    }
+ 
+ 	*restrictlist = worklist;
+ 	return fkselec;
+@@ -5400,7 +5820,7 @@
+ 	rel->tuples = 1;
+ 
+ 	/* Now estimate number of output rows, etc */
+-	set_baserel_size_estimates(root, rel);
++    set_baserel_size_estimates(root, rel);
+ }
+ 
+ /*
+diff -Naur postgresql-13.1/src/backend/utils/misc/guc.c postgresql-13.1-modify/src/backend/utils/misc/guc.c
+--- postgresql-13.1/src/backend/utils/misc/guc.c	2020-11-10 06:24:30.000000000 +0800
++++ postgresql-13.1-modify/src/backend/utils/misc/guc.c	2023-05-25 15:28:58.000000000 +0800
+@@ -2040,6 +2040,56 @@
+ 		NULL, NULL, NULL
+ 	},
+ 
++    {
++            {"debug_mode", PGC_USERSET, UNGROUPED,
++             gettext_noop("Enable debug mode"),
++             NULL
++            },
++            &debug_mode,
++            false,
++            NULL, NULL, NULL
++    },
++
++    {
++            {"read_single_cards", PGC_USERSET, UNGROUPED,
++             gettext_noop("Enable external cardinality estimation for single table sub-queries."),
++             NULL
++            },
++            &read_single_cards,
++            false,
++            NULL, NULL, NULL
++    },
++
++    {
++            {"read_join_cards", PGC_USERSET, UNGROUPED,
++             gettext_noop("Enable external cardinality estimation for join sub-queries."),
++             NULL
++            },
++            &read_join_cards,
++            false,
++            NULL, NULL, NULL
++    },
++
++    {
++            {"print_sub_queries", PGC_USERSET, UNGROUPED,
++             gettext_noop("Enable sub-queries printing."),
++             NULL
++            },
++            &print_sub_queries,
++            false,
++            NULL, NULL, NULL
++    },
++
++    {
++            {"write_pg_card_estimates", PGC_USERSET, UNGROUPED,
++             gettext_noop("Enable the built-in cardinality estimation results dumping."),
++             NULL
++            },
++            &write_pg_card_estimates,
++            false,
++            NULL, NULL, NULL
++    },
++
+ 	/* End-of-list marker */
+ 	{
+ 		{NULL, 0, 0, NULL, NULL}, NULL, false, NULL, NULL, NULL
+@@ -3381,6 +3431,57 @@
+ 		NULL, assign_tcp_user_timeout, show_tcp_user_timeout
+ 	},
+ 
++    {
++            {"mainquery_no", PGC_USERSET, UNGROUPED,
++             gettext_noop("Sets the mainquery number of cardinality estimation."),
++             NULL
++            },
++            &mainquery_no,
++            0, 0, INT_MAX,
++            NULL, NULL, NULL
++    },
++
++
++    {
++            {"join_est_no", PGC_USERSET, UNGROUPED,
++             gettext_noop("Sets the join sub-query number of cardinality estimation."),
++             NULL
++            },
++            &join_est_no,
++            0, 0, INT_MAX,
++            NULL, NULL, NULL
++    },
++
++    {
++            {"single_est_no", PGC_USERSET, UNGROUPED,
++             gettext_noop("Sets the single-tbl sub-query number of cardinality estimation."),
++             NULL
++            },
++            &single_est_no,
++            0, 0, INT_MAX,
++            NULL, NULL, NULL
++    },
++
++    {
++            {"single_read_flag", PGC_USERSET, UNGROUPED,
++             gettext_noop("Determine if re-read cardinality estimations of single-tbl sub-queries from file."),
++             NULL
++            },
++            &single_read_flag,
++            0, 0, INT_MAX,
++            NULL, NULL, NULL
++    },
++
++    {
++            {"join_read_flag", PGC_USERSET, UNGROUPED,
++             gettext_noop("Determine if re-read cardinality estimations of join sub-queries from file."),
++             NULL
++            },
++            &join_read_flag,
++            0, 0, INT_MAX,
++            NULL, NULL, NULL
++    },
++
+ 	/* End-of-list marker */
+ 	{
+ 		{NULL, 0, 0, NULL, NULL}, NULL, 0, 0, 0, NULL, NULL, NULL
+@@ -4430,6 +4531,50 @@
+ 		check_backtrace_functions, assign_backtrace_functions, NULL
+ 	},
+ 
++    {
++            {"single_cards_fname", PGC_USERSET, UNGROUPED,
++                    gettext_noop("Sets the file name of external cardnality estimations for single table sub-queries."),
++                    NULL,
++                    GUC_IS_NAME
++            },
++            &single_cards_fname,
++            "",
++            check_cluster_name, NULL, NULL
++    },
++
++    {
++            {"join_cards_fname", PGC_USERSET, UNGROUPED,
++                    gettext_noop("Sets the file name of external cardnality estimations for join sub-queries."),
++                    NULL,
++                    GUC_IS_NAME
++            },
++            &join_cards_fname,
++            "",
++            check_cluster_name, NULL, NULL
++    },
++
++    {
++            {"pg_single_cards_fname", PGC_USERSET, UNGROUPED,
++                    gettext_noop("Dump the built-in estimation results for single table sub-queries into this file."),
++                    NULL,
++                    GUC_IS_NAME
++            },
++            &pg_single_cards_fname,
++            "",
++            check_cluster_name, NULL, NULL
++    },
++
++    {
++            {"pg_join_cards_fname", PGC_USERSET, UNGROUPED,
++                    gettext_noop("Dump the built-in estimation results for join sub-queries into this file."),
++                    NULL,
++                    GUC_IS_NAME
++            },
++            &pg_join_cards_fname,
++            "",
++            check_cluster_name, NULL, NULL
++    },
++
+ 	/* End-of-list marker */
+ 	{
+ 		{NULL, 0, 0, NULL, NULL}, NULL, NULL, NULL, NULL, NULL
+diff -Naur postgresql-13.1/src/include/optimizer/cost.h postgresql-13.1-modify/src/include/optimizer/cost.h
+--- postgresql-13.1/src/include/optimizer/cost.h	2020-11-10 06:24:30.000000000 +0800
++++ postgresql-13.1-modify/src/include/optimizer/cost.h	2023-05-25 15:32:35.000000000 +0800
+@@ -67,6 +67,23 @@
+ extern PGDLLIMPORT bool enable_partition_pruning;
+ extern PGDLLIMPORT int constraint_exclusion;
+ 
++extern bool debug_mode;
++extern int mainquery_no;
++extern bool print_sub_queries;
++extern bool read_single_cards;
++extern bool read_join_cards;
++extern int single_est_no;
++extern int join_est_no;
++extern int single_read_flag;
++extern int join_read_flag;
++extern char *single_cards_fname;
++extern char *join_cards_fname;
++extern bool write_pg_card_estimates;
++extern char *pg_single_cards_fname;
++extern char *pg_join_cards_fname;
++
++extern void debug_print_rel(PlannerInfo *root, RelOptInfo *rel);
++
+ extern double index_pages_fetched(double tuples_fetched, BlockNumber pages,
+ 								  double index_pages, PlannerInfo *root);
+ extern void cost_seqscan(Path *path, PlannerInfo *root, RelOptInfo *baserel,
