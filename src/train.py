@@ -203,14 +203,11 @@ def load_data(args):
     train_features = train_features[shuffle_idxes]
     train_labels = train_labels[shuffle_idxes]
 
-    # validation_features = train_features[N_train:]
-    # validation_labels = train_labels[N_train:]
-    #
-    # train_features = train_features[0: N_train]
-    # train_labels = train_labels[0: N_train]
+    validation_features = train_features[N_train:]
+    validation_labels = train_labels[N_train:]
 
-    validation_features = test_features
-    validation_labels = test_labels
+    train_features = train_features[0: N_train]
+    train_labels = train_labels[0: N_train]
 
     label_mean = np.mean(train_labels)
     if args.use_loss_weights == 1:
