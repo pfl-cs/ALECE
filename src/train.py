@@ -266,7 +266,6 @@ if __name__ == '__main__':
 
     # ====================================================
     preds = preds.tolist()
-    # print('len(preds) =', len(preds))
     workload_dir = arg_parser_utils.get_workload_dir(args, test_wl_type)
     e2e_dir = os.path.join(args.experiments_dir, args.e2e_dirname)
     FileViewer.detect_and_create_dir(e2e_dir)
