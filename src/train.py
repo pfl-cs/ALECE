@@ -177,16 +177,12 @@ def load_data(args):
 
     print('Processing data...')
 
-    # print('before processing, train_features.shape =', train_features.shape)
     (train_features, train_cards) = valid_datasets((train_features, train_cards))
-    # print('after processing, train_features.shape =', train_features.shape)
 
     train_labels = cards_to_labels(train_cards, args)
 
     _n_test = test_features.shape[0]
-    # print('before processing, test_features.shape =', test_features.shape)
     (test_features, test_cards) = valid_datasets((test_features, test_cards))
-    # print('test_features.shape =', test_features.shape)
     assert test_features.shape[0] == _n_test
 
     test_labels = cards_to_labels(test_cards, args)
