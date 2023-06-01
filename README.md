@@ -20,7 +20,7 @@ We propose an Attention-based LEarned Cardinality Estimator (ALECE~for short) ma
 ```
 
 
-## First thing to use the codes
+## First thing to use the code
 - You need to make some configurations of the data locations. Run the following scripts.
 ```bash
 - cd ALECE/src
