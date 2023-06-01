@@ -44,7 +44,7 @@ We propose an Attention-based LEarned Cardinality Estimator (ALECE~for short) ma
 - echo 'export LD_LIBRARY_PATH=/usr/local/pgsql/13.1/lib/:$LD_LIBRARY_PATH' >> ~/.bashrc
 - source ~/.bashrc
 ```
-- You need to specify the directory ($PG_DATADIR$) to put the database data and create a database whose name is the same with your account name of the Linux system. Suppose your account name is 'Tom' and your postgresql data directory is '/home/Tom/pg_data', run the following scripts.
+- You need to specify the directory (\$PG_DATADIR\$) to put the database data and create a database whose name is the same with your account name of the Linux system. Suppose your account name is 'Tom' and your postgresql data directory is '/home/Tom/pg_data', run the following scripts.
 ```bash
 - initdb -D /home/Tom/pg_data
 - set port = 4321 in /home/Tom/pg_data/postgresql.conf
