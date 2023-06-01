@@ -72,7 +72,7 @@ You can also conduct both replacements by running the following scripts.
 ```
 
 #### Citation
-- It is an improved benchmark based on existing work. If you find the code useful, please cite both papers:
+- We will provide the citation information after our paper's publishment. Also, this repo contains an improved benchmark based on existing work. If you find the code useful, please also cite this paper:
 
 ```bash
 @article{DBLP:journals/pvldb/HanWWZYTZCQPQZL21,
@@ -98,7 +98,7 @@ You can also conduct both replacements by running the following scripts.
 	year      = {2021}
 }
 
-We will provide the citation information after our paper's publishment.
+
 ```
 
 ## ALECE Training
