@@ -132,7 +132,7 @@ class attnModel(tf.keras.Model):
         super(attnModel, self).__init__()
 
         self.num_self_attn_layers = args.num_self_attn_layers
-        self.num_external_attn_layers = args.num_external_attn_layers
+        self.num_cross_attn_layers = args.num_cross_attn_layers
         self.num_attrs = args.num_attrs
         self.attr_states_dim = args.n_bins
         self._dtype = tf.float32
@@ -154,17 +154,17 @@ class attnModel(tf.keras.Model):
             for _ in range(self.num_self_attn_layers)]
 
         # Query-analyzer
-        self.external_attn_layers = [
+        self.cross_attn_layers = [
             attention(
                 args,
                 if_self_attn=False
             )
-            for _ in range(self.num_external_attn_layers)]
+            for _ in range(self.num_cross_attn_layers)]
 
         for layer in self.self_attn_layers:
             self.regularization += layer.regularization
 
-        for layer in self.external_attn_layers:
+        for layer in self.cross_attn_layers:
             self.regularization += layer.regularization
 
         mlp_layers = []
@@ -219,8 +219,8 @@ class attnModel(tf.keras.Model):
             x = self.self_attn_layers[i].attn(x, x, training)
 
         # Query-analyzer forward
-        for i in range(self.num_external_attn_layers):
-            q = self.external_attn_layers[i].attn(x, q, training)
+        for i in range(self.num_cross_attn_layers):
+            q = self.cross_attn_layers[i].attn(x, q, training)
 
         preds = self.reg(q, training=training)
 

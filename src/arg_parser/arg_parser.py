@@ -68,7 +68,7 @@ def get_stats_arg_parser():
     parser.add_argument('--attn_head_key_dim', type=int, default=511, help='')
     parser.add_argument('--feed_forward_dim', type=int, default=2048, help='')
     parser.add_argument('--num_self_attn_layers', type=int, default=6, help='')
-    parser.add_argument('--num_external_attn_layers', type=int, default=6, help='')
+    parser.add_argument('--num_cross_attn_layers', type=int, default=6, help='')
 
     # ----------------------------------- Featurization Params -----------------------------------
     parser.add_argument('--num_tables', type=int, default=8,
