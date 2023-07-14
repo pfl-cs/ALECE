@@ -199,6 +199,9 @@ def load_data(args):
     train_features = train_features[shuffle_idxes]
     train_labels = train_labels[shuffle_idxes]
 
+    # split data into training and validation parts
+    N_train = int(N_train * 0.9)
+
     validation_features = train_features[N_train:]
     validation_labels = train_labels[N_train:]
 
