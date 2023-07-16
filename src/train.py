@@ -218,6 +218,7 @@ def load_data(args):
 
     train_data = (train_features, weights, train_labels)
     validation_data = (validation_features, validation_labels)
+    # validation_data = (test_features, test_labels)
     test_data = (test_features, test_labels)
 
     train_data = organize_data(train_data, args)
@@ -278,4 +279,4 @@ if __name__ == '__main__':
     lines = [(str(x) + '\n') for x in preds]
     file_utils.write_all_lines(path, lines)
 
-# python train.py --model ALECE --batch_size 128 --keep_train 0 --gpu 0 --data STATS --wl_type ins_heavy
+# python train.py --model ALECE --batch_size 128 --keep_train 0 --gpu 1 --data STATS --wl_type ins_heavy
