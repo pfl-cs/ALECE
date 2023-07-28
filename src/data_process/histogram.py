@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import sys
+import copy
 sys.path.append("../")
 from src.utils import file_utils, FileViewer, sql_utils
 from src.arg_parser import arg_parser
