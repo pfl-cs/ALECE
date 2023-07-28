@@ -41,18 +41,30 @@ class tableHistogram(object):
                             # val = int(term)
                             val = float(term)
                         initial_data[i].append(val)
-            initial_data = [np.array(data_i, dtype=np.float64) for data_i in initial_data]
+            initial_data = [np.sort(np.array(data_i, dtype=np.float64)) for data_i in initial_data]
             boundary_points = []
             for k in range(self.n_attrs):
                 arange_idxes = np.reshape(np.arange(1, self.n_bins + 1, dtype=np.float64), [1, -1])
                 boundary_points.append(arange_idxes)
             boundary_points = np.concatenate(boundary_points, axis=0)
-            boundary_points *= np.reshape(self.bin_sizes, [-1,1])
+            boundary_points *= np.reshape(self.bin_sizes, [-1, 1])
+            assert (boundary_points.shape[0] == min_vals.shape[0])
+            for i in range(min_vals.shape[0]):
+                boundary_points[i] += min_vals[i]
+            boundary_points[:, -1] += 1
+            print(f'boundary_points.shape = {boundary_points.shape}, len(lines) = {len(lines)}')
 
             self.histogram = []
             for i in range(self.n_attrs):
                 sorted_idxes = np.searchsorted(initial_data[i], boundary_points[i], side='left')
-                self.histogram.append(np.reshape(sorted_idxes, [1, -1]))
+                print(
+                    f'table = {os.path.basename(initial_data_path)[0:-4]}, i = {i}, sorted_idxes[0:10] = {sorted_idxes[0:10]}, sorted_idxes[-10:] = {sorted_idxes[-10:]}')
+                assert sorted_idxes[-1] == initial_data[i].shape[0]
+                sorted_idxes_left_translation = copy.deepcopy(sorted_idxes)
+                sorted_idxes_left_translation[1:] = sorted_idxes_left_translation[0:-1]
+                sorted_idxes_left_translation[0] = 0
+                diff = sorted_idxes - sorted_idxes_left_translation
+                self.histogram.append(np.reshape(diff, [1, -1]))
             self.histogram = np.concatenate(self.histogram, axis=0, dtype=np.float64)
         else:
             self.histogram = np.zeros(shape=[self.n_attrs, self.n_bins], dtype=np.float64)
