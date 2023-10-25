@@ -72,30 +72,23 @@ You can also conduct both replacements by running the following scripts.
 ```
 
 #### Citation
-- We will provide the citation information after our paper's publishment. Also, this repo contains an improved benchmark based on existing work. If you find the code useful, please also cite this paper:
+- If you find the code useful, please cite our paper:
 
 ```bash
-@article{DBLP:journals/pvldb/HanWWZYTZCQPQZL21,
-	author    = {Yuxing Han and
-	Ziniu Wu and
-	Peizhi Wu and
-	Rong Zhu and
-	Jingyi Yang and
-	Liang Wei Tan and
-	Kai Zeng and
-	Gao Cong and
-	Yanzhao Qin and
-	Andreas Pfadler and
-	Zhengping Qian and
-	Jingren Zhou and
-	Jiangneng Li and
-	Bin Cui},
-	title     = {Cardinality Estimation in {DBMS:} {A} Comprehensive Benchmark Evaluation},
-	journal   = {Proc. {VLDB} Endow.},
-	volume    = {15},
-	number    = {4},
-	pages     = {752--765},
-	year      = {2021}
+@article{li2023alece,
+  author       = {Pengfei Li and
+                  Wenqing Wei and
+                  Rong Zhu and
+                  Bolin Ding and
+                  Jingren Zhou and
+                  Hua Lu},
+  title        = {{ALECE}: An Attention-based Learned Cardinality Estimator for {SPJ}
+                  Queries on Dynamic Workloads},
+  journal   = {Proc. {VLDB} Endow.},
+  volume    = {17},
+  number    = {2},
+  pages     = {197--210},
+  year      = {2023}
 }
 
 
