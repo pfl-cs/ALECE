@@ -50,8 +50,8 @@ def get_stats_arg_parser():
     # ----------------------------------- DB Params -----------------------------------
     parser.add_argument('--db_data_dir', type=str, default='$PG_DATADIR$', help='')
     parser.add_argument('--db_name', type=str, default='', help='')
-    parser.add_argument('--db_subqueries_fname', type=str, default='sub_queries.txt', help='')
-    parser.add_argument('--db_single_tbls_fname', type=str, default='single_tbl_queries.txt', help='')
+    parser.add_argument('--db_subqueries_fname', type=str, default='join_sub_queries.txt', help='')
+    parser.add_argument('--db_single_tbls_fname', type=str, default='single_sub_queries.txt', help='')
 
     # ----------------------------------- Model Params -----------------------------------
     parser.add_argument('--model', type=str, default='ALECE', help='')
