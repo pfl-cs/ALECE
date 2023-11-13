@@ -13,7 +13,7 @@ def hints_gen_exec(args, costs_path, hints_path):
     pg_utils.database_init(args, static_workload=if_static_workload)
     if_static_workload, conn, cur, sqls, _, num_single_tbls_list = e2e_eval.prepare_before_running_workload(args)
     ignore_single_cards = e2e_eval.judge_if_ignore_single_cards(args)
-    setting_sqls = e2e_eval.get_setting_sqls(args, 0, 0, db_task='p_error')
+    setting_sqls = e2e_eval.get_setting_sqls(args, 0, 0, db_task='p_error', ignore_single_cards=ignore_single_cards)
 
     cancel_setting_sqls = [
         'SET read_single_cards=false;',
@@ -86,7 +86,7 @@ def p_error_exec(args, costs_path, hints_path):
     args.model = 'optimal'
     ignore_single_cards = e2e_eval.judge_if_ignore_single_cards(args)
 
-    setting_sqls = e2e_eval.get_setting_sqls(args, 0, 0, db_task='p_error')
+    setting_sqls = e2e_eval.get_setting_sqls(args, 0, 0, db_task='p_error', ignore_single_cards=ignore_single_cards)
     cancel_setting_sqls = [
         'SET read_single_cards=false;',
         'SET single_read_flag=0;'
@@ -192,4 +192,4 @@ if __name__ == '__main__':
     calc_p_error(args)
     # calc_p_error(args, db_task='p_error')
 
-# python benchmark/p_error_cmp.py --data STATS --wl_type ins_heavy --model attn
+# python benchmark/p_error_cmp.py --data STATS --wl_type ins_heavy --model attn --ignore_single_cards 0
