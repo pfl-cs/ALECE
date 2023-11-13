@@ -180,7 +180,10 @@ def get_setting_sqls(args, join_est_no, single_est_no, ignore_single_cards=True,
         setting_sqls.append(f'SET join_est_no={join_est_no};')
 
         if ignore_single_cards == False:
-            single_cards_read_sqls = get_single_cards_read_sqls(args, single_est_no)
+            model_name = None
+            if db_task == 'p_error':
+                model_name = 'optimal'
+            single_cards_read_sqls = get_single_cards_read_sqls(args, single_est_no, model_name=model_name)
             setting_sqls.extend(single_cards_read_sqls)
     elif args.db_task == 'pg_card_access':
         setting_sqls.append('SET write_pg_card_estimates=true;')
