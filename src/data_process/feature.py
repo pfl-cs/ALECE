@@ -1,11 +1,11 @@
 import os
+import numpy as np
 import sys
 sys.path.append("../")
 from src.utils import file_utils, arg_parser_utils
 from src.arg_parser import arg_parser
 from src.data_process import histogram
 from .parse_sql import *
-
 
 # now, a query is assumed to contain range selection and equi-join condition
 class queryFeature(object):
@@ -31,9 +31,6 @@ class queryFeature(object):
 
         tmp = self.attr_ranges_all[:, 1] - self.attr_ranges_all[:, 0]
 
-        # minv = np.min(tmp)
-        # print('********minv =', minv)
-
         self.attr_range_measures[:, 0] = tmp
         self.attr_range_measures[:, 1] = tmp
 
@@ -43,7 +40,6 @@ class queryFeature(object):
 
         self.n_tables = len(attr_ranges_list)
         self.n_attrs_total = self.attr_types_all.shape[0]
-
 
         self.maxn_attrs_single_table = self.attr_ranges_list[0].shape[0]
         for i in range(1, self.n_tables):
@@ -149,29 +145,6 @@ class queryFeature(object):
         features[:, cursor:cursor + self.n_attrs_total * 2] = ((sql_attr_ranges_conds_batch - self.attr_lbds) / self.attr_range_measures) * 2.0 - 1
         return features
 
-    def encode_batch_old(self, sql_join_conds_batch, sql_attr_ranges_conds_batch, relevant_tables_list):
-        """
-        :param sql_join_conds_batch: list of sql_join_conds
-        :param sql_attr_ranges_conds_batch: shape=[batch_size, self.n_attrs_total * 2]
-        :return:
-        """
-        batch_size = len(sql_join_conds_batch)
-        features = np.zeros(shape=[batch_size, self.n_possible_joins + self.n_attrs_total * 2],
-                            dtype=np.float64)
-        for i in range(batch_size):
-            relevant_tables = relevant_tables_list[i]
-            sql_join_conds = sql_join_conds_batch[i]
-            if sql_join_conds is not None:
-                # encode conjunctive join conds
-                join_id_idxes = self.calc_join_nos(sql_join_conds)
-                # print(join_id_idxes)
-                features[i][join_id_idxes] = 1
-        cursor = self.n_possible_joins
-
-        # encode conjunctive filter conds
-        features[:, cursor:cursor + self.n_attrs_total * 2] = ((sql_attr_ranges_conds_batch - self.attr_lbds) / self.attr_range_measures) * 2.0 - 1
-
-        return features
 
 
 def query_part_features_gen(qF, join_conds_list, attr_range_conds_list, true_card_list, cartesian_join_card_list, natural_join_card_list, relevant_tables_list):
