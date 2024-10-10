@@ -14,7 +14,7 @@ We propose an Attention-based LEarned Cardinality Estimator (ALECE~for short) ma
 
 ```bash
 - cd ALECE && mkdir data
-- Download the STATS dataset (https://drive.google.com/file/d/18V9MhlN_5PmFOhKdzUcAIIOXYc1sYtvK/view?usp=sharing)
+- Download the STATS dataset (https://drive.google.com/file/d/1XR-xzQ1Ablqv5-LInRPp67PeXbeX_s4c/view?usp=sharing)
 - Put STATS.tar.gz in data/;
 - tar zxvf STATS.tar.gz
 ```
